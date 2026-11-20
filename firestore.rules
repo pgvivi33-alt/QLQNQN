@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 그 밖의 다른 컬렉션은 읽기와 쓰기를 모두 차단
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == 'pgvivi33@gmail.com';
+    }
+
+    function isValidCategory(cat) {
+      return cat is string && cat in ['사진 합성', '스타일 변환', '캐릭터·포스터'];
+    }
+
+    function isValidPrompt(data) {
+      return data.keys().hasAll(['title', 'category', 'content', 'createdAt'])
+        && data.keys().hasOnly(['title', 'category', 'content', 'createdAt'])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 100
+        && isValidCategory(data.category)
+        && data.content is string && data.content.size() >= 1 && data.content.size() <= 10000
+        && data.createdAt is timestamp;
+    }
+
+    match /prompts/{promptId} {
+      // prompts 컬렉션은 로그인하지 않아도 누구나 읽기 가능
+      allow get: if isValidId(promptId);
+      allow list: if true;
+
+      // 추가, 수정, 삭제는 관리자(pgvivi33@gmail.com)만 가능
+      allow create: if isAdmin()
+        && isValidId(promptId)
+        && isValidPrompt(incoming())
+        && incoming().createdAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidId(promptId)
+        && isValidPrompt(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'category', 'content']);
+
+      allow delete: if isAdmin() && isValidId(promptId);
+    }
+  }
+}
